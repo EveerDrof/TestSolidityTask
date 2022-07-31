@@ -58,6 +58,7 @@ contract TaskContract {
         internal
         returns (Deposit memory)
     {
+        require(minutesInterval > 0);
         uint256 startDate = block.timestamp;
         uint256 endDate = startDate + minutesInterval * oneMinute;
         uint256 additionPercentage = getStakeAdditionPercentage(
