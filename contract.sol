@@ -1,6 +1,7 @@
 pragma solidity ^0.8.6;
 
 contract MyContract {
+    // Structs
     struct Tariff {
         uint256 percentPerMinute;
         uint256 minimumMinutesValue;
@@ -20,10 +21,12 @@ contract MyContract {
     struct ClientData {
         address wallet;
         bool isValue;
+        Deposit deposit;
     }
+
+    // Global variables
     uint256 oneMinute = 1 minutes;
     mapping(address => ClientData) clients;
-    mapping(address => Deposit[]) deposits;
     address[] clientsWallets;
     Settings settings;
 
@@ -31,9 +34,19 @@ contract MyContract {
         addTariff(1, 1);
         addTariff(3, 3);
         addTariff(5, 5);
+        addTariff(10, 10);
 
         settings = Settings({owner: owner});
     }
+
+    // Modifiers
+
+    modifier onlyRegistered() {
+        require(clients[msg.sender].isValue);
+        _;
+    }
+
+    // Internal functions
 
     function addTariff(uint256 percentPerMinute, uint256 minimumMinutesValue)
         internal
@@ -50,7 +63,8 @@ contract MyContract {
         internal
         returns (Deposit memory)
     {
-        uint256 endDate = minutesInterval * oneMinute;
+        uint256 startDate = block.timestamp;
+        uint256 endDate = startDate + minutesInterval * oneMinute;
         uint256 additionPercentage = getStakeAdditionPercentage(
             minutesInterval
         );
@@ -61,7 +75,7 @@ contract MyContract {
         return
             Deposit(
                 msg.value,
-                block.timestamp,
+                startDate,
                 endDate,
                 additionPercentage,
                 valueAfterAddition
@@ -71,21 +85,24 @@ contract MyContract {
     function createStake(uint256 minutesInterval) public payable {
         ClientData storage clientData = clients[msg.sender];
         if (clientData.isValue) {
-            deposits[msg.sender].push(createDeposit(minutesInterval));
-            settings.owner.transfer(msg.value);
+            require(clientData.deposit.value == 0);
+            clientData.deposit = createDeposit(minutesInterval);
             return;
         }
         Deposit memory deposit = createDeposit(minutesInterval);
-        deposits[msg.sender].push(deposit);
-        clients[msg.sender] = ClientData(msg.sender, true);
-        settings.owner.transfer(msg.value);
+        clients[msg.sender] = ClientData(msg.sender, true, deposit);
     }
 
     function getStakingBalance() public view returns (uint256) {
         return address(this).balance;
     }
 
-    function getClientData() public view returns (ClientData memory) {
+    function getClientData()
+        public
+        view
+        onlyRegistered
+        returns (ClientData memory)
+    {
         return clients[msg.sender];
     }
 
@@ -103,37 +120,31 @@ contract MyContract {
         return tariffs[tariffsSize - 1].percentPerMinute;
     }
 
-    function withdrawCoins() public payable {
-        ClientData memory data = clients[msg.sender];
-        require(data.isValue);
-        Deposit[] memory clientDeposits = deposits[msg.sender];
-        for (uint256 i = 0; i < clientDeposits.length; i++) {
-            Deposit memory deposit = clientDeposits[i];
-            if (
-                block.timestamp >= deposit.endDate &&
-                address(this).balance >= deposit.value
-            ) {
-                uint256 stake = deposit.valueAfterAddition;
-                payable(msg.sender).transfer(stake);
-            } else {
-                return;
-            }
-        }
+    function withdrawCoins() public payable onlyRegistered {
+        Deposit memory clientDeposit = clients[msg.sender].deposit;
+        require(clientDeposit.value > 0);
+        require(block.timestamp >= clientDeposit.endDate);
+        require(address(this).balance >= clientDeposit.value);
+        uint256 stake = clientDeposit.valueAfterAddition;
+        payable(msg.sender).transfer(stake);
+        clientDeposit.value = 0;
     }
 
-    function removeFromDeposits(uint256 index) internal {
-        Deposit[] storage senderDeposits = deposits[msg.sender];
-        uint256 senderDepositsSize = senderDeposits.length;
-        Deposit[] memory depositsCopy = new Deposit[](senderDepositsSize);
-        if (index >= senderDepositsSize) return;
-
-        for (uint256 i = index; i < senderDepositsSize - 1; i++) {
-            depositsCopy[i] = senderDeposits[i + 1];
-        }
-        deposits[msg.sender] = depositsCopy;
+    function getClientDepositValue()
+        public
+        view
+        onlyRegistered
+        returns (uint256)
+    {
+        return clients[msg.sender].deposit.value;
     }
 
-    function getClientDeposits() public view returns (Deposit[] memory) {
-        return deposits[msg.sender];
+    function getAllClientsData() public view returns (ClientData[] memory) {
+        uint256 registeredClientsNumber = clientsWallets.length;
+        ClientData[] memory result = new ClientData[](registeredClientsNumber);
+        for (uint256 i = 0; i < registeredClientsNumber; i++) {
+            result[i] = clients[clientsWallets[i]];
+        }
+        return result;
     }
 }
