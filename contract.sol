@@ -1,22 +1,18 @@
 pragma solidity ^0.8.6;
 
-contract MyContract {
+contract TaskContract {
     // Structs
     struct Tariff {
         uint256 percentPerMinute;
         uint256 minimumMinutesValue;
     }
-    struct Settings {
-        address payable owner;
-    }
-    mapping(uint256 => Tariff) tariffs;
-    uint256 tariffsSize;
     struct Deposit {
         uint256 value;
         uint256 startDate;
         uint256 endDate;
         uint256 additionPercentage;
         uint256 valueAfterAddition;
+        bool wasWithdrawn;
     }
     struct ClientData {
         address wallet;
@@ -25,18 +21,21 @@ contract MyContract {
     }
 
     // Global variables
+    address payable owner;
+
+    mapping(uint256 => Tariff) tariffs;
+    uint256 tariffsSize;
     uint256 oneMinute = 1 minutes;
     mapping(address => ClientData) clients;
     address[] clientsWallets;
-    Settings settings;
 
-    constructor(address payable owner) payable {
+    constructor(address payable _owner) payable {
         addTariff(1, 1);
         addTariff(3, 3);
         addTariff(5, 5);
         addTariff(10, 10);
 
-        settings = Settings({owner: owner});
+        owner = _owner;
     }
 
     // Modifiers
@@ -55,10 +54,6 @@ contract MyContract {
         tariffsSize += 1;
     }
 
-    function addCoinsToContract() public payable {
-        require(msg.value > 0);
-    }
-
     function createDeposit(uint256 minutesInterval)
         internal
         returns (Deposit memory)
@@ -70,7 +65,9 @@ contract MyContract {
         );
 
         uint256 valueAfterAddition = msg.value;
-        valueAfterAddition += (valueAfterAddition / 100) * additionPercentage;
+        valueAfterAddition +=
+            (valueAfterAddition / 100) *
+            (additionPercentage * minutesInterval);
 
         return
             Deposit(
@@ -78,32 +75,9 @@ contract MyContract {
                 startDate,
                 endDate,
                 additionPercentage,
-                valueAfterAddition
+                valueAfterAddition,
+                false
             );
-    }
-
-    function createStake(uint256 minutesInterval) public payable {
-        ClientData storage clientData = clients[msg.sender];
-        if (clientData.isValue) {
-            require(clientData.deposit.value == 0);
-            clientData.deposit = createDeposit(minutesInterval);
-            return;
-        }
-        Deposit memory deposit = createDeposit(minutesInterval);
-        clients[msg.sender] = ClientData(msg.sender, true, deposit);
-    }
-
-    function getStakingBalance() public view returns (uint256) {
-        return address(this).balance;
-    }
-
-    function getClientData()
-        public
-        view
-        onlyRegistered
-        returns (ClientData memory)
-    {
-        return clients[msg.sender];
     }
 
     function getStakeAdditionPercentage(uint256 stakeMinutes)
@@ -120,23 +94,45 @@ contract MyContract {
         return tariffs[tariffsSize - 1].percentPerMinute;
     }
 
+    //Payable
+    function addCoinsToContract() public payable {
+        require(msg.value > 0);
+    }
+
+    function createStake(uint256 minutesInterval) public payable {
+        ClientData storage clientData = clients[msg.sender];
+        if (clientData.isValue) {
+            require(clientData.deposit.wasWithdrawn);
+            clientData.deposit = createDeposit(minutesInterval);
+            return;
+        }
+        Deposit memory deposit = createDeposit(minutesInterval);
+        clients[msg.sender] = ClientData(msg.sender, true, deposit);
+        clientsWallets.push(msg.sender);
+    }
+
     function withdrawCoins() public payable onlyRegistered {
         Deposit memory clientDeposit = clients[msg.sender].deposit;
-        require(clientDeposit.value > 0);
+        require(!clientDeposit.wasWithdrawn);
         require(block.timestamp >= clientDeposit.endDate);
         require(address(this).balance >= clientDeposit.value);
         uint256 stake = clientDeposit.valueAfterAddition;
         payable(msg.sender).transfer(stake);
-        clientDeposit.value = 0;
+        clients[msg.sender].deposit.wasWithdrawn = true;
     }
 
-    function getClientDepositValue()
+    // Views
+    function getStakingBalance() public view returns (uint256) {
+        return address(this).balance;
+    }
+
+    function getClientData()
         public
         view
         onlyRegistered
-        returns (uint256)
+        returns (ClientData memory)
     {
-        return clients[msg.sender].deposit.value;
+        return clients[msg.sender];
     }
 
     function getAllClientsData() public view returns (ClientData[] memory) {
