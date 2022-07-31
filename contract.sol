@@ -100,6 +100,7 @@ contract TaskContract {
     }
 
     function depositCoins(uint256 minutesInterval) public payable {
+        require(msg.value > 0);
         ClientData storage clientData = clients[msg.sender];
         if (clientData.isValue) {
             require(clientData.deposit.wasWithdrawn);
